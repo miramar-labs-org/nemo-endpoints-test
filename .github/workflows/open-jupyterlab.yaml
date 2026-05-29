@@ -31,7 +31,7 @@ jobs:
           SCRIPT: |
             set -euo pipefail
             mkdir -p "${HOME}/git-miramar-labs-org/projects"
-            DEST="${DEST}"
+            DEST="${HOME}/git-miramar-labs-org/projects/${REPO_NAME}"
             if [ -d "${DEST}/.git" ]; then
               git -C "${DEST}" stash
               git -C "${DEST}" pull --ff-only
