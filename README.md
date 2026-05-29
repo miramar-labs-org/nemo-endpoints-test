@@ -4,7 +4,7 @@
 [![Deploy to NeMo](https://github.com/miramar-labs-org/nemo-endpoints-test/actions/workflows/deploy-nemo.yaml/badge.svg)](https://github.com/miramar-labs-org/nemo-endpoints-test/actions/workflows/deploy-nemo.yaml)
 [![Undeploy from NeMo](https://github.com/miramar-labs-org/nemo-endpoints-test/actions/workflows/undeploy-nemo.yaml/badge.svg)](https://github.com/miramar-labs-org/nemo-endpoints-test/actions/workflows/undeploy-nemo.yaml)
 
-<!-- One-line description of this project -->
+Systematic HTTP endpoint tester for all NeMo Microservices APIs on the Miramar platform.
 
 **Type**: NeMo Microservices
 
@@ -17,31 +17,19 @@ NeMo running on DGX — trigger **NeMo Deploy** in [miramar-platform-gcp](https:
 | Workflow | Input | Effect |
 |---|---|---|
 | **Open in JupyterLab** | — | Clone/pull repo to DGX `~/git-miramar-labs-org/projects/`, print direct URL |
-| **Deploy to NeMo** | `job_name` (optional override) | Submit training job from `job_config.yaml` |
+| **Deploy to NeMo** | `job_name` (optional) | Submit a training job from `job_config.yaml` |
 | **Undeploy from NeMo** | `job_name` | Cancel a training job |
 
-## Project structure
-
-```
-job_config.yaml      ← Training job config — edit this first
-notebook.ipynb       ← Interactive development with NeMo SDK
-scripts/
-  submit_job.py        ← Called by Deploy to NeMo workflow
-  cancel_job.py        ← Called by Undeploy from NeMo workflow
-```
-
----
-
-## Developer guide: filling out the notebook
+## Running the endpoint tests
 
 ### 1. Open in JupyterLab
 
 Trigger **Open in JupyterLab** from the Actions tab. It clones/pulls this repo to
-`~/git-miramar-labs-org/projects/nemo-endpoints-test` on the DGX and prints a direct link in the workflow summary.
+`~/git-miramar-labs-org/projects/nemo-endpoints-test` on the DGX and prints a direct link.
 
 Then open: [http://localhost:8888/lab/tree/git-miramar-labs-org/projects/nemo-endpoints-test](http://localhost:8888/lab/tree/git-miramar-labs-org/projects/nemo-endpoints-test)
 
-### 2. Set up NeMo access
+### 2. Set up access
 
 SSH tunnel from your laptop:
 
@@ -55,114 +43,34 @@ Add to your laptop's `/etc/hosts` (Windows: `C:\Windows\System32\drivers\etc\hos
 127.0.0.1 nemo.test nim.test data-store.test
 ```
 
-Then open JupyterLab at [http://localhost:8888](http://localhost:8888).
+### 3. Run the notebook
 
-### 3. Install the NeMo SDK
+Open `notebook.ipynb` and run all cells. Each section tests a service group. The final cell prints a summary table with endpoint, HTTP status, and PASS/FAIL/SKIP for each.
 
-In a terminal or notebook cell:
+- **PASS** — HTTP 2xx
+- **FAIL** — HTTP 4xx/5xx (service reachable but returned an error)
+- **SKIP** — connection refused or timeout (service not deployed or not reachable)
 
-```sh
-pip install nemo-microservices pyyaml
-```
+## Endpoints tested
 
-### 4. Connect and explore
-
-```python
-from nemo_microservices import NeMoMicroservices
-
-client = NeMoMicroservices(
-    base_url="http://nemo.test:8082",
-    inference_base_url="http://nim.test:8082",
-)
-
-# List available base models
-for m in client.models.list().items:
-    print(m.name)
-```
-
-### 5. Configure your job
-
-Edit `job_config.yaml`:
-
-```yaml
-name: "nemo-endpoints-test-job"
-model: "meta/llama-3.1-8b"       # base model to fine-tune
-training:
-  num_epochs: 3
-  batch_size: 8
-  learning_rate: 1.0e-4
-  dataset_path: ""                # upload your dataset first (see below)
-```
-
-#### Uploading a dataset
-
-```sh
-# Upload a JSONL file to the NeMo data store
-curl -X POST "http://data-store.test:8082/v1/hf/datasets/upload" \
-  -F "file=@my_dataset.jsonl"
-```
-
-Then set `dataset_path` in `job_config.yaml` to the returned path.
-
-### 6. Submit a job from the notebook
-
-```python
-import yaml
-
-with open("job_config.yaml") as f:
-    config = yaml.safe_load(f)
-
-job = client.customization.jobs.create(
-    name=config["name"],
-    model=config["model"],
-    training_config={
-        "num_epochs": config["training"]["num_epochs"],
-        "batch_size": config["training"].get("batch_size", 8),
-        "learning_rate": config["training"].get("learning_rate", 1e-4),
-    },
-    dataset={"file_path": config["training"].get("dataset_path", "")},
-)
-print(f"Job: {job.id}  status: {job.status}")
-```
-
-### 7. Monitor job status
-
-```python
-import time
-
-for _ in range(60):
-    j = client.customization.jobs.retrieve(config["name"])
-    print(f"  {j.status}")
-    if j.status in ("completed", "failed", "cancelled"):
-        break
-    time.sleep(30)
-```
-
-### 8. Run inference on the fine-tuned model (after job completes)
-
-```python
-# Point the client at the fine-tuned model
-response = client.inference.completions.create(
-    model=config["name"],
-    prompt="Summarise this document:",
-    max_tokens=256,
-)
-print(response.choices[0].text)
-```
-
-### 9. CI/CD via GitHub Actions
-
-When `job_config.yaml` is ready, trigger **Deploy to NeMo** from the Actions tab.
-The workflow calls `scripts/submit_job.py` and prints the job name + ID in the summary.
-
----
-
-## API endpoints (after SSH tunnel + /etc/hosts)
-
-| Endpoint | URL | What it does |
+| Host | Path | Service |
 |---|---|---|
-| List jobs | [http://nemo.test:8082/v1/customization/jobs](http://nemo.test:8082/v1/customization/jobs) | All fine-tuning jobs |
-| List models | [http://nemo.test:8082/v1/models](http://nemo.test:8082/v1/models) | Available base models |
-| Data store health | [http://data-store.test:8082/v1/health](http://data-store.test:8082/v1/health) | Data store status |
-| NIM inference | [http://nim.test:8082/v1/models](http://nim.test:8082/v1/models) | Deployed NIM models |
-| JupyterLab | [http://localhost:8888](http://localhost:8888) | Notebook environment |
+| `nemo.test:8082` | `/v1/namespaces`, `/v1/projects`, `/v1/datasets`, `/v1/repos`, `/v1/models` | nemo-entity-store |
+| `nemo.test:8082` | `/v1/deployment/model-deployments`, `/v2/inference/gateway`, `/v2/inference`, `/v2/models` | nemo-deployment-management / nemo-core-api |
+| `nemo.test:8082` | `/v1/jobs` | nemo-core-api |
+| `nemo.test:8082` | `/v1/customization/jobs`, `/v1/customization/models` | nemo-customizer |
+| `nemo.test:8082` | `/v1/evaluation/jobs`, `/v1/evaluation/targets`, `/v2/evaluation/jobs` | nemo-evaluator |
+| `nemo.test:8082` | `/v1/data-designer/jobs` | nemo-data-designer |
+| `nemo.test:8082` | `/v1beta1/audit`, `/v1beta1/safe-synthesizer`, `/v1/intake` | nemo-auditor / nemo-safe-synthesizer / nemo-intake |
+| `data-store.test:8082` | `/v1/health` | nemo-data-store |
+| `nim.test:8082` | `/v1/models`, `/v1/chat/completions` (dynamic), `/v1/completions`, `/v1/embeddings` | nemo-nim-proxy |
+
+## Project structure
+
+```
+notebook.ipynb       ← Endpoint tester — run all cells to test all APIs
+job_config.yaml      ← NeMo training job config (for Deploy/Undeploy workflows)
+scripts/
+  submit_job.py        ← Called by Deploy to NeMo workflow
+  cancel_job.py        ← Called by Undeploy from NeMo workflow
+```
